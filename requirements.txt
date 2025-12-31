@@ -1,0 +1,8 @@
+streamlit
+python-docx
+requests
+openai
+google-generativeai
+pydantic
+pymupdf  # for PDF processing
+python-docx

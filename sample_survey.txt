@@ -1,0 +1,59 @@
+Survey: Customer Satisfaction
+
+Introduction:
+Thank you for participating in our customer satisfaction survey. Your feedback is important to us.
+
+Questions:
+
+1. What is your age?
+   - Under 18
+   - 18-24
+   - 25-34
+   - 35-44
+   - 45-54
+   - 55-64
+   - 65 or over
+
+2. How satisfied are you with our products?
+   - Very satisfied
+   - Satisfied
+   - Neutral
+   - Dissatisfied
+   - Very dissatisfied
+
+3. Do you recommend our products to others?
+   - Definitely
+   - Probably
+   - Not sure
+   - Probably not
+   - Definitely not
+
+4. What do you like most about our products?
+   - Quality
+   - Price
+   - Customer service
+   - Design
+   - Other (please specify)
+
+5. What improvements would you like to see in our products?
+   - Better quality
+   - Lower prices
+   - Improved customer service
+   - Better design
+   - Other (please specify)
+
+6. How often do you purchase from us?
+   - Weekly
+   - Monthly
+   - Quarterly
+   - Yearly
+   - Rarely
+
+7. Overall, how would you rate your experience with our company?
+   - Excellent
+   - Good
+   - Average
+   - Poor
+   - Terrible
+
+Thank you for completing our survey.
