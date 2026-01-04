@@ -18,7 +18,7 @@ def get_survey_analysis_prompt(file_content):
     - Examine the relationship between the contextual statement and individual questions in the table
     - EACH table MUST be a 4pts likert scale questions
     - The Questions INCLUDING THE SUGGESTED ALTERNATIVE QUESTION must be POSITIVELY FRAMED IN THE CONTEXT OF THE VARIABLE DEFINITION.
-    - ALTERNATIVE QUESTION SHOULD NOT BE BE A DUPLICATE OF OTHER QUESTIONS.
+    - ALTERNATIVE QUESTION SHOULD NOT BE THE SAME AS OTHER QUESTIONS.
 
     For each individual question, provide a "Valid" or "Not Valid" assessment with reasons including:
     - Whether the question has duplicate meaning with other questions (with reference to table number and question item number of the duplicate)
@@ -81,7 +81,7 @@ def get_gemini_prompt(file_content):
     - Examine the relationship between the contextual statement and individual questions in the table
     - EACH table MUST be a 4pts likert scale questions
     - The Questions INCLUDING THE SUGGESTED ALTERNATIVE QUESTION must be POSITIVELY FRAMED IN THE CONTEXT OF THE VARIABLE DEFINITION.
-    - ALTERNATIVE QUESTION SHOULD NOT BE BE A DUPLICATE OF OTHER QUESTIONS.
+    - ALTERNATIVE QUESTION SHOULD NOT BE THE SAME AS OTHER QUESTIONS.
 
     For each individual question, provide a "Valid" or "Not Valid" assessment with reasons including:
     - Whether the question has duplicate meaning with other questions (with reference to table number and question item number of the duplicate)

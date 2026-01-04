@@ -7,6 +7,8 @@ from docx.shared import Inches
 from datetime import datetime
 import requests
 import time
+import concurrent.futures
+from threading import Lock
 
 # Import the prompts module
 from prompts import (
@@ -189,27 +191,24 @@ def upload_and_results_section():
 
         for i, result in enumerate(st.session_state.analysis_results):
             with st.expander(f"Result {i+1}: {result['filename']}"):
-                st.json(result['analysis'])
+                # Auto-generate DOCX file and provide download link
+                docx_file = generate_docx(result['analysis'], result['filename'])
+                with open(docx_file, "rb") as f:
+                    st.download_button(
+                        label="Download DOCX Report",
+                        data=f,
+                        file_name=f"quality_report_{result['filename']}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key=f"docx_download_{i}"
+                    )
 
-                # Download JSON button
-                json_str = json.dumps(result['analysis'], indent=2)
-                st.download_button(
-                    label="Download JSON Result",
-                    data=json_str,
-                    file_name=f"analysis_result_{result['filename']}.json",
-                    mime="application/json"
-                )
+                # Optional: Show a preview of the analysis (first few lines)
+                with st.popover("View Analysis Summary"):
+                    st.write("**Overall Assessment:**")
+                    assessment = result['analysis'].get('overall_assessment', 'No assessment available')
+                    # Limit the display to first 500 characters for preview
+                    st.caption(assessment[:500] + "..." if len(assessment) > 500 else assessment)
 
-                # Generate DOCX button
-                if st.button(f"Generate DOCX for {result['filename']}", key=f"docx_{i}"):
-                    docx_file = generate_docx(result['analysis'], result['filename'])
-                    with open(docx_file, "rb") as f:
-                        st.download_button(
-                            label="Download DOCX Report",
-                            data=f,
-                            file_name=f"quality_report_{result['filename']}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
     else:
         st.info("No analysis results yet. Upload surveys and run analysis to see results here.")
 
@@ -245,70 +244,121 @@ def settings_section():
         default=["Clarity", "Bias Detection", "Relevance"]
     )
 
+def analyze_single_file(uploaded_file, selected_models):
+    """Analyze a single survey file using selected AI models - returns analysis without UI updates"""
+    # Process different file types
+    file_content = process_uploaded_file(uploaded_file)
+
+    if not file_content:
+        return {'filename': uploaded_file.name, 'error': f"Could not process file: {uploaded_file.name}"}
+
+    # Prepare analysis for each selected model
+    file_analysis = {
+        'filename': uploaded_file.name,
+        'models_used': [],
+        'individual_question_analysis': [],
+        'recommendations': [],
+        'overall_assessment': "",
+        'timestamp': datetime.now().isoformat()
+    }
+
+    for model in selected_models:
+        # Call AI model for analysis
+        model_analysis = call_ai_model(file_content, model)
+        file_analysis['models_used'].append({
+            'model_name': model['name'],
+            'analysis': model_analysis
+        })
+
+        # Process model analysis results
+        if 'recommendations' in model_analysis:
+            file_analysis['recommendations'].extend(model_analysis['recommendations'])
+
+        # Include detailed analysis components if present
+        if 'individual_question_analysis' in model_analysis:
+            file_analysis['individual_question_analysis'].extend(model_analysis['individual_question_analysis'])
+
+        if 'overall_assessment' in model_analysis:
+            # Clean up the model assessment to remove any JSON formatting
+            raw_assessment = model_analysis['overall_assessment']
+            clean_model_assessment = raw_assessment
+            if raw_assessment:
+                # Check if the raw assessment looks like a complete JSON response
+                # (starts with { and ends with }, which would indicate the entire response is JSON)
+                stripped = raw_assessment.strip()
+                if stripped.startswith('{') and stripped.endswith('}'):
+                    # This looks like the entire response is JSON, which means the model returned
+                    # the full JSON structure as the overall assessment
+                    # Try to parse it and extract just the actual assessment text
+                    try:
+                        parsed = json.loads(raw_assessment)
+                        # If it has an overall_assessment field, use that
+                        if 'overall_assessment' in parsed and isinstance(parsed['overall_assessment'], str):
+                            clean_model_assessment = parsed['overall_assessment']
+                        else:
+                            # If not, just clean up the JSON formatting markers
+                            clean_model_assessment = raw_assessment.replace('```json', '').replace('```', '').strip()
+                            import re
+                            clean_model_assessment = re.sub(r'\s+', ' ', clean_model_assessment)
+                    except json.JSONDecodeError:
+                        # If it's not valid JSON, just clean up formatting markers
+                        clean_model_assessment = raw_assessment.replace('```json', '').replace('```', '').strip()
+                        import re
+                        clean_model_assessment = re.sub(r'\s+', ' ', clean_model_assessment)
+                else:
+                    # Just clean up formatting markers for regular text
+                    clean_model_assessment = raw_assessment.replace('```json', '').replace('```', '').strip()
+                    import re
+                    clean_model_assessment = re.sub(r'\s+', ' ', clean_model_assessment)
+
+            if file_analysis['overall_assessment']:
+                file_analysis['overall_assessment'] += f"\n\nAssessment by {model['name']}:\n{clean_model_assessment}"
+            else:
+                file_analysis['overall_assessment'] = f"Assessment by {model['name']}:\n{clean_model_assessment}"
+
+    return {
+        'filename': uploaded_file.name,
+        'analysis': file_analysis
+    }
+
 def analyze_surveys(selected_models):
-    """Analyze uploaded surveys using selected AI models"""
+    """Analyze uploaded surveys using selected AI models with parallel processing"""
     results = []
 
     # Show overall progress
     total_files = len(st.session_state.uploaded_files)
-    for idx, uploaded_file in enumerate(st.session_state.uploaded_files):
-        # Show progress for current file
-        progress_text = f"Processing file {idx + 1} of {total_files}: {uploaded_file.name}..."
-        st.info(progress_text)
+    progress_text = f"Starting parallel analysis of {total_files} file(s)..."
+    st.info(progress_text)
 
-        # Process different file types
-        st.info(f"Extracting content from {uploaded_file.name}...")
-        file_content = process_uploaded_file(uploaded_file)
-
-        if not file_content:
-            st.error(f"Could not process file: {uploaded_file.name}")
-            continue
-
-        st.success(f"Content extracted from {uploaded_file.name}, sending to AI model...")
-
-        # Prepare analysis for each selected model
-        file_analysis = {
-            'filename': uploaded_file.name,
-            'models_used': [],
-            'individual_question_analysis': [],
-            'recommendations': [],
-            'overall_assessment': "",
-            'timestamp': datetime.now().isoformat()
+    # Use ThreadPoolExecutor for parallel processing
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(st.session_state.uploaded_files))) as executor:
+        # Submit all file processing tasks
+        future_to_file = {
+            executor.submit(analyze_single_file, uploaded_file, selected_models): uploaded_file
+            for uploaded_file in st.session_state.uploaded_files
         }
 
-        for model in selected_models:
-            # Show progress for model analysis
-            model_progress_text = f"Analyzing {uploaded_file.name} with {model['name']}..."
-            st.info(model_progress_text)
+        # Collect results as they complete
+        completed_count = 0
+        for future in concurrent.futures.as_completed(future_to_file):
+            completed_count += 1
+            uploaded_file = future_to_file[future]
 
-            # Call AI model for analysis
-            model_analysis = call_ai_model(file_content, model)
-            file_analysis['models_used'].append({
-                'model_name': model['name'],
-                'analysis': model_analysis
-            })
+            # Update progress
+            progress_text = f"Completed {completed_count} of {total_files} files: {uploaded_file.name}"
+            st.info(progress_text)
 
-            # Process model analysis results
-            if 'recommendations' in model_analysis:
-                file_analysis['recommendations'].extend(model_analysis['recommendations'])
-
-            # Include detailed analysis components if present
-            if 'individual_question_analysis' in model_analysis:
-                file_analysis['individual_question_analysis'].extend(model_analysis['individual_question_analysis'])
-
-            if 'overall_assessment' in model_analysis:
-                if file_analysis['overall_assessment']:
-                    file_analysis['overall_assessment'] += f"\n\nAssessment by {model['name']}:\n{model_analysis['overall_assessment']}"
-                else:
-                    file_analysis['overall_assessment'] = f"Assessment by {model['name']}:\n{model_analysis['overall_assessment']}"
-
-        results.append({
-            'filename': uploaded_file.name,
-            'analysis': file_analysis
-        })
+            try:
+                result = future.result()
+                if result and 'error' not in result:
+                    results.append(result)
+                elif 'error' in result:
+                    st.error(result['error'])
+            except Exception as e:
+                st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
 
     st.session_state.analysis_results = results
-    st.success(f"Analysis complete for {len(results)} file(s)!")
+    st.success(f"Parallel analysis complete for {len(results)} file(s)!")
 
 def process_uploaded_file(uploaded_file):
     """Process different file types and extract text content, including tables"""
@@ -381,11 +431,11 @@ def process_uploaded_file(uploaded_file):
             return content
 
         else:
-            st.error(f"Unsupported file type: {file_extension}")
+            print(f"Unsupported file type: {file_extension}")
             return None
 
     except Exception as e:
-        st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
+        print(f"Error processing file {uploaded_file.name}: {str(e)}")
         return None
 
 def call_ai_model(file_content, model):
@@ -435,13 +485,9 @@ def call_ai_model(file_content, model):
         prompt = get_gemini_prompt(file_content)
 
         try:
-            # Show status that document has been sent to Gemini
-            st.info(f"Document sent to {model['name']}, waiting for response...")
             response = gemini_model.generate_content(
                 [prompt]  # Pass as a list
             )
-            # Show status that response has been received
-            st.success(f"Response received from {model['name']}")
 
             # Parse the JSON response from Gemini
             try:
@@ -455,7 +501,6 @@ def call_ai_model(file_content, model):
                 }
             return analysis
         except Exception as e:
-            st.error(f"Error calling {model['name']}: {str(e)}")
             return {
                 "individual_question_analysis": [],
                 "overall_assessment": "",
@@ -482,32 +527,40 @@ def call_ai_model(file_content, model):
         url = model.get('endpoint') or 'https://openrouter.ai/api/v1/chat/completions'
 
         try:
-            # Show status that document has been sent to the model
-            st.info(f"Document sent to {model['name']}, waiting for response...")
             response = requests.post(url, headers=headers, json=payload)
             response.raise_for_status()
             result = response.json()
 
-            # Show status that response has been received
-            st.success(f"Response received from {model['name']}")
-
             # Extract the content from the response
             content = result['choices'][0]['message']['content']
 
-            # Try to parse as JSON, but handle if it's not valid JSON
-            try:
-                analysis = json.loads(content)
-            except json.JSONDecodeError:
-                # If content is not valid JSON, wrap it in our expected format
+            # Try to extract valid JSON from the content
+            analysis = extract_valid_json(content)
+
+            # If we couldn't extract valid JSON, wrap it in our expected format
+            if analysis is None:
                 analysis = {
                     "individual_question_analysis": [],
                     "overall_assessment": content,
                     "recommendations": ["This model did not return structured JSON. Raw analysis: " + content]
                 }
 
+            # Clean up any JSON formatting that might be embedded in the overall assessment
+            if 'overall_assessment' in analysis and analysis['overall_assessment']:
+                # Remove any JSON code block markers and clean up the text
+                assessment = analysis['overall_assessment']
+                # Remove markdown code block markers if present
+                assessment = assessment.replace('```json', '').replace('```', '').strip()
+                # If the assessment looks like it's just JSON, try to extract meaningful text
+                if assessment.startswith('{') and assessment.endswith('}'):
+                    # This means the entire assessment field was returned as JSON, which shouldn't happen
+                    # The assessment should be plain text, not JSON structure
+                    extracted = extract_valid_json(assessment)
+                    if extracted and 'overall_assessment' in extracted:
+                        analysis['overall_assessment'] = extracted['overall_assessment']
+
             return analysis
         except Exception as e:
-            st.error(f"Error calling {model['name']}: {str(e)}")
             return {
                 "quality_metrics": {},
                 "recommendations": [f"Error analyzing with {model['name']}: {str(e)}"],
@@ -550,51 +603,153 @@ def call_ai_model(file_content, model):
         url = model.get('endpoint') or 'https://api.openai.com/v1/chat/completions'
 
     try:
-        # Show status that document has been sent to the model
-        st.info(f"Document sent to {model['name']}, waiting for response...")
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
         result = response.json()
 
-        # Show status that response has been received
-        st.success(f"Response received from {model['name']}")
-
         # Extract the content from the response
         content = result['choices'][0]['message']['content']
 
-        # Parse the JSON response
-        try:
-            analysis = json.loads(content)
-        except json.JSONDecodeError:
-            # If content is not valid JSON, wrap it in our expected format
+        # Try to extract valid JSON from the content
+        analysis = extract_valid_json(content)
+
+        # If we couldn't extract valid JSON, wrap it in our expected format
+        if analysis is None:
             analysis = {
                 "individual_question_analysis": [],
                 "overall_assessment": content,
                 "recommendations": ["This model did not return structured JSON. Raw analysis: " + content]
             }
 
+        # Clean up any JSON formatting that might be embedded in the overall assessment
+        if 'overall_assessment' in analysis and analysis['overall_assessment']:
+            # Remove any JSON code block markers and clean up the text
+            assessment = analysis['overall_assessment']
+            # Remove markdown code block markers if present
+            assessment = assessment.replace('```json', '').replace('```', '').strip()
+            # If the assessment looks like it's just JSON, try to extract meaningful text
+            if assessment.startswith('{') and assessment.endswith('}'):
+                # This means the entire assessment field was returned as JSON, which shouldn't happen
+                # The assessment should be plain text, not JSON structure
+                extracted = extract_valid_json(assessment)
+                if extracted and 'overall_assessment' in extracted:
+                    analysis['overall_assessment'] = extracted['overall_assessment']
+
         return analysis
     except Exception as e:
-        st.error(f"Error calling {model['name']}: {str(e)}")
         return {
             "individual_question_analysis": [],
             "overall_assessment": "",
             "recommendations": [f"Error analyzing with {model['name']}: {str(e)}"]
         }
 
+def extract_valid_json(content):
+    """
+    Extract valid JSON from content that may contain additional text or formatting.
+    This function tries multiple strategies to extract valid JSON from AI model responses.
+    """
+    import re
+    import json
+
+    # Strategy 1: Try to parse as-is
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Remove markdown code blocks and try to parse
+    cleaned_content = content.replace('```json', '').replace('```', '').strip()
+    try:
+        return json.loads(cleaned_content)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3: Extract JSON object using regex (look for content between { and })
+    # This handles cases where there's text before or after the JSON
+    json_match = re.search(r'\{.*\}', content, re.DOTALL)
+    if json_match:
+        json_str = json_match.group()
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 4: Look for JSON array as well (for cases where the response is an array)
+    array_match = re.search(r'\[.*\]', content, re.DOTALL)
+    if array_match:
+        array_str = array_match.group()
+        try:
+            return json.loads(array_str)
+        except json.JSONDecodeError:
+            pass
+
+    # If all strategies fail, return None
+    return None
+
+
 def generate_docx(analysis_data, filename):
     """Generate a DOCX report from analysis data"""
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+
     doc = Document()
 
-    # Title
-    doc.add_heading('Survey Questionnaire Quality Report', 0)
-    doc.add_paragraph(f'Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    doc.add_paragraph(f'Analyzed File: {filename}')
+    # Set document title with larger font
+    title = doc.add_heading('Survey Questionnaire Quality Report', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.runs[0].font.size = Pt(24)
+    title.runs[0].font.bold = True
+
+    # Add metadata section
+    metadata_section = doc.add_paragraph()
+    metadata_section.add_run(f'Analyzed File: ').bold = True
+    metadata_section.add_run(f'{filename}')
+    metadata_section.add_run('\nGenerated on: ').bold = True
+    metadata_section.add_run(f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+
+    # Add a horizontal line
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(12)
+    p.add_run().add_break()
+
+    # Add executive summary section
+    doc.add_heading('Executive Summary', level=1)
+
+    # Count valid and invalid questions
+    valid_count = 0
+    invalid_count = 0
+    total_questions = 0
+
+    if 'individual_question_analysis' in analysis_data and analysis_data['individual_question_analysis']:
+        for question in analysis_data['individual_question_analysis']:
+            validity = question.get('validity', 'N/A')
+            if validity.lower() == 'valid':
+                valid_count += 1
+            elif validity.lower() == 'not valid':
+                invalid_count += 1
+            total_questions += 1
+
+    summary_para = doc.add_paragraph()
+    summary_para.add_run(f'Total Questions Analyzed: ').bold = True
+    summary_para.add_run(f'{total_questions}\n')
+    summary_para.add_run(f'Valid Questions: ').bold = True
+    summary_para.add_run(f'{valid_count}\n')
+    summary_para.add_run(f'Invalid Questions: ').bold = True
+    summary_para.add_run(f'{invalid_count}\n')
+
+    if total_questions > 0:
+        valid_percentage = (valid_count / total_questions) * 100
+        summary_para.add_run(f'Quality Score: ').bold = True
+        summary_para.add_run(f'{valid_percentage:.1f}%\n')
+    else:
+        valid_percentage = 0  # Default value when no questions are analyzed
 
     # Add individual question analysis if present
     if 'individual_question_analysis' in analysis_data and analysis_data['individual_question_analysis']:
-        doc.add_heading('Individual Question Analysis', level=1)
-        for question in analysis_data['individual_question_analysis']:
+        doc.add_heading('Detailed Question Analysis', level=1)
+
+        for i, question in enumerate(analysis_data['individual_question_analysis'], 1):
             question_text = question.get('question_text', 'N/A')
             validity = question.get('validity', 'N/A')
             reason = question.get('reason', 'N/A')
@@ -602,43 +757,111 @@ def generate_docx(analysis_data, filename):
             item_number = question.get('item_number', 'N/A')
             variable_name = question.get('variable_name', 'N/A')
 
-            doc.add_paragraph(f"Table {table_number}, Item {item_number} (Variable: {variable_name}): {question_text}", style='List Bullet')
-            doc.add_paragraph(f"  Validity: {validity}", style='List Bullet')
-            doc.add_paragraph(f"  Reason: {reason}", style='List Bullet')
+            # Create a heading for each question
+            question_heading = doc.add_heading(f'Question {i}', level=2)
+            if validity.lower() == 'not valid':
+                from docx.shared import RGBColor
+                question_heading.runs[0].font.color.rgb = RGBColor(255, 0, 0)  # Red for invalid questions
+            else:
+                from docx.shared import RGBColor
+                question_heading.runs[0].font.color.rgb = RGBColor(0, 128, 0)  # Green for valid questions
+
+            # Add question details in a table for better organization
+            table = doc.add_table(rows=1, cols=2)
+            table.style = 'Table Grid'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Attribute'
+            hdr_cells[1].text = 'Value'
+
+            # Add question details
+            row_cells = table.add_row().cells
+            row_cells[0].text = 'Table Number'
+            row_cells[1].text = str(table_number)
+
+            row_cells = table.add_row().cells
+            row_cells[0].text = 'Item Number'
+            row_cells[1].text = str(item_number)
+
+            row_cells = table.add_row().cells
+            row_cells[0].text = 'Variable Name'
+            row_cells[1].text = variable_name
+
+            row_cells = table.add_row().cells
+            row_cells[0].text = 'Question Text'
+            row_cells[1].text = question_text
+
+            row_cells = table.add_row().cells
+            row_cells[0].text = 'Validity'
+            row_cells[1].text = validity
+            if validity.lower() == 'not valid':
+                from docx.shared import RGBColor
+                row_cells[1].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 0, 0)  # Red
+                row_cells[1].paragraphs[0].runs[0].font.bold = True
+            else:
+                from docx.shared import RGBColor
+                row_cells[1].paragraphs[0].runs[0].font.color.rgb = RGBColor(0, 128, 0)  # Green
+                row_cells[1].paragraphs[0].runs[0].font.bold = True
+
+            row_cells = table.add_row().cells
+            row_cells[0].text = 'Reason'
+            row_cells[1].text = reason
 
             # Add alternative question if present and the question is not valid
             alternative_question = question.get('alternative_question', '')
             if alternative_question and validity.lower() == 'not valid':
-                doc.add_paragraph(f"  Suggested Alternative: {alternative_question}", style='List Bullet')
+                row_cells = table.add_row().cells
+                row_cells[0].text = 'Suggested Alternative'
+                row_cells[1].text = alternative_question
 
             # Add duplicate information if present
             duplicates_with = question.get('duplicates_with', [])
             if duplicates_with:
-                doc.add_paragraph(f"  Duplicates with:", style='List Bullet')
-                for dup in duplicates_with:
+                row_cells = table.add_row().cells
+                row_cells[0].text = 'Duplicates With'
+                dup_text = ""
+                for j, dup in enumerate(duplicates_with):
                     dup_table = dup.get('table_number', 'N/A')
                     dup_item = dup.get('item_number', 'N/A')
-                    dup_text = dup.get('question_text', 'N/A')
-                    doc.add_paragraph(f"    Table {dup_table}, Item {dup_item}: {dup_text}", style='List Bullet')
+                    dup_text += f"Table {dup_table}, Item {dup_item}"
+                    if j < len(duplicates_with) - 1:
+                        dup_text += "; "
+                row_cells[1].text = dup_text
 
             doc.add_paragraph("")  # Empty line for spacing
 
-    doc.add_heading('Overall Assessment', level=1)
-
     # Add overall assessment
+    doc.add_heading('Overall Assessment', level=1)
     if 'overall_assessment' in analysis_data:
         doc.add_paragraph(analysis_data['overall_assessment'])
 
-    doc.add_heading('General Recommendations', level=1)
-
     # Add general recommendations
+    doc.add_heading('Recommendations', level=1)
     if 'recommendations' in analysis_data and analysis_data['recommendations']:
-        for rec in analysis_data['recommendations']:
-            doc.add_paragraph(rec, style='List Bullet')
+        for i, rec in enumerate(analysis_data['recommendations'], 1):
+            p = doc.add_paragraph()
+            p.add_run(f'{i}. ').bold = True
+            p.add_run(rec)
+    else:
+        doc.add_paragraph('No specific recommendations provided.')
+
+    # Add conclusion
+    doc.add_heading('Conclusion', level=1)
+    conclusion_para = doc.add_paragraph()
+    conclusion_para.add_run('This report provides a comprehensive analysis of the survey questionnaire. ').bold = True
+    conclusion_para.add_run('Based on the analysis, the survey has ')
+    if valid_percentage >= 80:
+        conclusion_para.add_run('good').bold = True
+        conclusion_para.add_run(' quality with most questions being valid.')
+    elif valid_percentage >= 60:
+        conclusion_para.add_run('moderate').bold = True
+        conclusion_para.add_run(' quality with some questions requiring attention.')
+    else:
+        conclusion_para.add_run('poor').bold = True
+        conclusion_para.add_run(' quality with many questions needing revision.')
 
     # Save to temporary file
     temp_dir = tempfile.mkdtemp()
-    temp_path = os.path.join(temp_dir, f"quality_report_{filename.replace('.txt', '').replace('.json', '')}.docx")
+    temp_path = os.path.join(temp_dir, f"quality_report_{filename.replace('.txt', '').replace('.json', '').replace('.docx', '').replace('.pdf', '').replace('.csv', '')}.docx")
     doc.save(temp_path)
 
     return temp_path
