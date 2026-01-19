@@ -312,9 +312,9 @@ def analyze_single_file(uploaded_file, selected_models):
                     clean_model_assessment = re.sub(r'\s+', ' ', clean_model_assessment)
 
             if file_analysis['overall_assessment']:
-                file_analysis['overall_assessment'] += f"\n\nAssessment by {model['name']}:\n{clean_model_assessment}"
+                file_analysis['overall_assessment'] += f"\n\n{clean_model_assessment}"
             else:
-                file_analysis['overall_assessment'] = f"Assessment by {model['name']}:\n{clean_model_assessment}"
+                file_analysis['overall_assessment'] = f"{clean_model_assessment}"
 
     return {
         'filename': uploaded_file.name,
@@ -388,8 +388,8 @@ def process_uploaded_file(uploaded_file):
             from docx import Document
             doc = Document(BytesIO(uploaded_file.getvalue()))
 
-            # Extract text content
-            content = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
+            # Extract text content (images are automatically ignored by python-docx)
+            content = '\n'.join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
 
             # Extract table content
             table_content = []
