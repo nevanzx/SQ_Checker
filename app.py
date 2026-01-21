@@ -161,7 +161,7 @@ def upload_and_results_section():
             min_value=0.0,
             max_value=1.0,
             value=selected_model['temperature'],
-            step=0.1,
+            step=0.05,
             key=f"temp_{selected_model['provider']}"
         )
         # Update the temperature in the session state

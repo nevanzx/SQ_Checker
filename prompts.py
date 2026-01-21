@@ -10,7 +10,7 @@ def get_survey_analysis_prompt(file_content):
     return f"""
     Analyze this survey questionnaire focusing on the validity of each question. For each question, determine if it is "Valid" or "Not Valid" with specific reasons.
 
-    CRITICAL: Pay special attention to tables in the survey. For each table:
+    ULTRA-CRITICAL: Pay special attention to tables in the survey. For each table:
     - Check the top of the table for contextual statements like "As a young adult I..." or similar
     - Identify the variable name from the contextual statement that applies to all questions in that table
     - Analyze each question in the table considering the variable context provided by the header statement
@@ -19,7 +19,7 @@ def get_survey_analysis_prompt(file_content):
     - EACH table MUST be a 4pts likert scale questions
     - Use the definition of the variable to guide your assessment of each question.
     - Some of the question may have indicators of a variable. Use the variables and indicator to correct the question.
-    - ALTERNATIVE QUESTION SHOULD NOT BE THE SAME AS OTHER QUESTIONS.
+    - **ALTERNATIVE QUESTION SHOULD NOT BE THE SAME AS OTHER QUESTIONS OTHER SUGGESTION AND CURRENT QUESTIONS.**
     - IF THE QUESTION HAS MULTIPLE ISSUES, ADDRESS ALL THE ISSUES IN THE REASON AND SUGGESTION.
     
     For each individual question, MARK "Not Valid" if the question is:
