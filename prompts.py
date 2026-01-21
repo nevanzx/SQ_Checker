@@ -22,7 +22,7 @@ def get_survey_analysis_prompt(file_content):
     - The Questions INCLUDING THE SUGGESTED ALTERNATIVE QUESTION must be POSITIVELY FRAMED IN THE CONTEXT OF THE VARIABLE DEFINITION.
     - The Questions must CORRESPOND AND VALID TOWARDS the SURVEY RESPONDENTS.
     - ALTERNATIVE QUESTION SHOULD NOT BE THE SAME AS OTHER QUESTIONS.
-    - The Question must be answerable by 4-Always, 3-Often, 2-Sometimes, 1-Never likert scale.
+    - The Question must be ANSWERABLE by 4-Always, 3-Often, 2-Sometimes, 1-Never likert scale.
     - IF THE QUESTION HAS MULTIPLE ISSUES, ADDRESS ALL THE ISSUES IN THE REASON AND SUGGESTION.
 
     For each individual question, provide a "Valid" or "Not Valid" assessment with reasons including:
