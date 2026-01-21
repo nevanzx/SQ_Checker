@@ -17,7 +17,10 @@ def get_survey_analysis_prompt(file_content):
     - Determine if each question is appropriate given the variable context provided by the header statement
     - Examine the relationship between the contextual statement and individual questions in the table
     - EACH table MUST be a 4pts likert scale questions
+    - Use the definition of the variable to guide your assessment of each question.
+    - Some of the question may have indicators of a variable. Use the variables and indicator to correct the question.
     - The Questions INCLUDING THE SUGGESTED ALTERNATIVE QUESTION must be POSITIVELY FRAMED IN THE CONTEXT OF THE VARIABLE DEFINITION.
+    - The Questions must CORRESPOND AND VALID TOWARDS the SURVEY RESPONDENTS.
     - ALTERNATIVE QUESTION SHOULD NOT BE THE SAME AS OTHER QUESTIONS.
 
     For each individual question, provide a "Valid" or "Not Valid" assessment with reasons including:
