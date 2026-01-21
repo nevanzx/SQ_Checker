@@ -51,8 +51,7 @@ def get_survey_analysis_prompt(file_content):
                     }}
                 ]
             }}
-        ],
-        "overall_assessment": "comprehensive_overall_assessment"
+        ]
     }}
 
     Survey content: {file_content}
