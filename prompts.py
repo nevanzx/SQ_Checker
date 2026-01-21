@@ -19,16 +19,15 @@ def get_survey_analysis_prompt(file_content):
     - EACH table MUST be a 4pts likert scale questions
     - Use the definition of the variable to guide your assessment of each question.
     - Some of the question may have indicators of a variable. Use the variables and indicator to correct the question.
-    - The Questions INCLUDING THE SUGGESTED ALTERNATIVE QUESTION must be POSITIVELY FRAMED IN THE CONTEXT OF THE VARIABLE DEFINITION.
-    - The Questions must CORRESPOND AND VALID TOWARDS the SURVEY RESPONDENTS.
     - ALTERNATIVE QUESTION SHOULD NOT BE THE SAME AS OTHER QUESTIONS.
-    - The Question must be ANSWERABLE by 4-Strongly Agree, 3-Agree, 2-Disagree, 1-Strongly Disagree likert scale.
     - IF THE QUESTION HAS MULTIPLE ISSUES, ADDRESS ALL THE ISSUES IN THE REASON AND SUGGESTION.
-
-    For each individual question, provide a "Valid" or "Not Valid" assessment with reasons including:
-    - Whether the question has duplicate meaning with other questions (with reference to table number and question item number of the duplicate)
-    - Whether the question is negatively phrased inappropriately relative to the variable
-    - Any other validity concerns
+    
+    For each individual question, MARK "Not Valid" if the question is:
+    - the question has duplicate meaning with other questions (with reference to table number and question item number of the duplicate)
+    - the question is negatively phrased inappropriately relative to the variable
+    - is not ANSWERABLE by 4-Strongly Agree, 3-Agree, 2-Disagree, 1-Strongly Disagree likert scale.
+    - the Questions must CORRESPOND AND VALID TOWARDS the SURVEY RESPONDENTS.
+    - The Questions INCLUDING THE SUGGESTED ALTERNATIVE QUESTION is not POSITIVELY FRAMED IN THE CONTEXT OF THE VARIABLE DEFINITION.
 
     If a question is "Not Valid", suggest an alternative question based on the definition of each variable and the contextual statement that applies to the table. The alternative question should address the same concept but in a valid way.
 
@@ -42,7 +41,7 @@ def get_survey_analysis_prompt(file_content):
                 "variable_name": "name_of_the_variable_from_contextual_statement",
                 "question_text": "exact_question_text",
                 "validity": "Valid or Not Valid",
-                "reason": "specific_reason_for_validity_assessment",
+                "reason": "specific_reasons_for_validity_assessment",
                 "alternative_question": "suggested_alternative_question_if_invalid_or_empty_string_if_valid",
                 "duplicates_with": [
                     {{
@@ -53,11 +52,7 @@ def get_survey_analysis_prompt(file_content):
                 ]
             }}
         ],
-        "overall_assessment": "comprehensive_overall_assessment",
-        "recommendations": [
-            "specific_recommendation_1",
-            "specific_recommendation_2"
-        ]
+        "overall_assessment": "comprehensive_overall_assessment"
     }}
 
     Survey content: {file_content}
