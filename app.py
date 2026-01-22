@@ -246,6 +246,8 @@ def analyze_single_file(uploaded_file, selected_models):
     file_analysis = {
         'filename': uploaded_file.name,
         'models_used': [],
+        'survey_general_instructions_analysis': {},
+        'survey_parts_analysis': {},
         'individual_question_analysis': [],
         'recommendations': [],
         'overall_assessment': "",
@@ -267,6 +269,27 @@ def analyze_single_file(uploaded_file, selected_models):
         # Include detailed analysis components if present
         if 'individual_question_analysis' in model_analysis:
             file_analysis['individual_question_analysis'].extend(model_analysis['individual_question_analysis'])
+
+            # Sort the individual question analysis by table number to group Part 2 and Part 3 items separately
+            # Handle both numeric and text-based table identifiers
+            def sort_key(item):
+                table_num = item.get('table_number', '999')
+                try:
+                    # Try to convert to integer if possible
+                    return (0, int(table_num))  # Priority 0 for numeric values
+                except ValueError:
+                    # If not numeric, use alphabetical ordering with priority 1
+                    return (1, table_num.lower())
+
+            file_analysis['individual_question_analysis'].sort(key=sort_key)
+
+        # Include general instructions analysis if present
+        if 'survey_general_instructions_analysis' in model_analysis:
+            file_analysis['survey_general_instructions_analysis'] = model_analysis['survey_general_instructions_analysis']
+
+        # Include survey parts analysis if present
+        if 'survey_parts_analysis' in model_analysis:
+            file_analysis['survey_parts_analysis'] = model_analysis['survey_parts_analysis']
 
         if 'overall_assessment' in model_analysis:
             # Clean up the model assessment to remove any JSON formatting
@@ -464,6 +487,24 @@ def call_ai_model(file_content, model):
         # If we couldn't extract valid JSON, wrap it in our expected format
         if analysis is None:
             analysis = {
+                "survey_general_instructions_analysis": {
+                    "instructions_present": False,
+                    "scale_correctly_defined": False,
+                    "scale_definition_text": "",
+                    "general_instructions_text": "",
+                    "issues_found": ["Could not parse general instructions from survey"],
+                    "recommendations": ["Ensure general instructions are clearly defined in the survey"]
+                },
+                "survey_parts_analysis": {
+                    "part_2_has_only_definitions": False,
+                    "part_3_has_only_definitions": False,
+                    "part_2_content_summary": "Could not parse Part 2 content",
+                    "part_3_content_summary": "Could not parse Part 3 content",
+                    "part_2_issues": ["Could not analyze Part 2 content"],
+                    "part_3_issues": ["Could not analyze Part 3 content"],
+                    "part_2_recommendations": ["Ensure Part 2 contains only variable definitions"],
+                    "part_3_recommendations": ["Ensure Part 3 contains only variable definitions"]
+                },
                 "individual_question_analysis": [],
                 "overall_assessment": content,
                 "recommendations": ["This model did not return structured JSON. Raw analysis: " + content]
@@ -486,6 +527,24 @@ def call_ai_model(file_content, model):
         return analysis
     except Exception as e:
         return {
+            "survey_general_instructions_analysis": {
+                "instructions_present": False,
+                "scale_correctly_defined": False,
+                "scale_definition_text": "",
+                "general_instructions_text": "",
+                "issues_found": [f"Error processing general instructions: {str(e)}"],
+                "recommendations": ["Check that the survey file is properly formatted"]
+            },
+            "survey_parts_analysis": {
+                "part_2_has_only_definitions": False,
+                "part_3_has_only_definitions": False,
+                "part_2_content_summary": f"Error processing Part 2: {str(e)}",
+                "part_3_content_summary": f"Error processing Part 3: {str(e)}",
+                "part_2_issues": [f"Error processing Part 2 content: {str(e)}"],
+                "part_3_issues": [f"Error processing Part 3 content: {str(e)}"],
+                "part_2_recommendations": ["Check that Part 2 contains only variable definitions"],
+                "part_3_recommendations": ["Check that Part 3 contains only variable definitions"]
+            },
             "individual_question_analysis": [],
             "overall_assessment": "",
             "recommendations": [f"Error analyzing with {model['name']}: {str(e)}"]
@@ -531,6 +590,37 @@ def extract_valid_json(content):
         except json.JSONDecodeError:
             pass
 
+    # Strategy 5: Handle cases where the response contains multiple JSON objects
+    # Look for the main survey analysis structure specifically
+    # Find the structure that contains our expected fields
+    # Find all potential JSON objects in the content
+    potential_matches = []
+    start = 0
+    while start < len(content):
+        open_brace = content.find('{', start)
+        if open_brace == -1:
+            break
+        # Find the matching closing brace
+        brace_count = 0
+        pos = open_brace
+        while pos < len(content):
+            if content[pos] == '{':
+                brace_count += 1
+            elif content[pos] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    potential_json = content[open_brace:pos+1]
+                    try:
+                        parsed = json.loads(potential_json)
+                        # Check if it has the expected structure
+                        if isinstance(parsed, dict) and ('individual_question_analysis' in parsed or 'survey_general_instructions_analysis' in parsed):
+                            return parsed
+                    except json.JSONDecodeError:
+                        pass
+                    break
+            pos += 1
+        start = pos + 1
+
     # If all strategies fail, return None
     return None
 
@@ -564,6 +654,117 @@ def generate_docx(analysis_data, filename):
     # Add executive summary section
     doc.add_heading('Executive Summary', level=1)
 
+    # Add general instructions analysis if present
+    if 'survey_general_instructions_analysis' in analysis_data:
+        general_instr_analysis = analysis_data['survey_general_instructions_analysis']
+
+        doc.add_heading('General Instructions Analysis', level=2)
+
+        # Create a table for general instructions analysis
+        gen_instr_table = doc.add_table(rows=1, cols=2)
+        gen_instr_table.style = 'Table Grid'
+        hdr_cells = gen_instr_table.rows[0].cells
+        hdr_cells[0].text = 'Attribute'
+        hdr_cells[1].text = 'Value'
+
+        # Add general instructions details
+        row_cells = gen_instr_table.add_row().cells
+        row_cells[0].text = 'Instructions Present'
+        row_cells[1].text = str(general_instr_analysis.get('instructions_present', 'N/A'))
+
+        row_cells = gen_instr_table.add_row().cells
+        row_cells[0].text = 'Scale Correctly Defined'
+        row_cells[1].text = str(general_instr_analysis.get('scale_correctly_defined', 'N/A'))
+
+        row_cells = gen_instr_table.add_row().cells
+        row_cells[0].text = 'Scale Definition'
+        row_cells[1].text = general_instr_analysis.get('scale_definition_text', 'N/A')
+
+        # Add issues found
+        row_cells = gen_instr_table.add_row().cells
+        row_cells[0].text = 'Issues Found'
+        issues_list = general_instr_analysis.get('issues_found', [])
+        if issues_list:
+            row_cells[1].text = '; '.join(issues_list)
+        else:
+            row_cells[1].text = 'None'
+
+        # Add recommendations
+        row_cells = gen_instr_table.add_row().cells
+        row_cells[0].text = 'Recommendations'
+        recommendations_list = general_instr_analysis.get('recommendations', [])
+        if recommendations_list:
+            row_cells[1].text = '; '.join(recommendations_list)
+        else:
+            row_cells[1].text = 'None'
+
+        doc.add_paragraph("")  # Empty line for spacing
+
+    # Add survey parts analysis if present
+    if 'survey_parts_analysis' in analysis_data:
+        parts_analysis = analysis_data['survey_parts_analysis']
+
+        doc.add_heading('Survey Parts Analysis', level=2)
+
+        # Create a table for survey parts analysis
+        parts_table = doc.add_table(rows=1, cols=2)
+        parts_table.style = 'Table Grid'
+        hdr_cells = parts_table.rows[0].cells
+        hdr_cells[0].text = 'Attribute'
+        hdr_cells[1].text = 'Value'
+
+        # Add Part 2 details
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 2 Has Only Definitions'
+        row_cells[1].text = str(parts_analysis.get('part_2_has_only_definitions', 'N/A'))
+
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 2 Content Summary'
+        row_cells[1].text = parts_analysis.get('part_2_content_summary', 'N/A')
+
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 2 Issues'
+        issues_list = parts_analysis.get('part_2_issues', [])
+        if issues_list:
+            row_cells[1].text = '; '.join(issues_list)
+        else:
+            row_cells[1].text = 'None'
+
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 2 Recommendations'
+        recommendations_list = parts_analysis.get('part_2_recommendations', [])
+        if recommendations_list:
+            row_cells[1].text = '; '.join(recommendations_list)
+        else:
+            row_cells[1].text = 'None'
+
+        # Add Part 3 details
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 3 Has Only Definitions'
+        row_cells[1].text = str(parts_analysis.get('part_3_has_only_definitions', 'N/A'))
+
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 3 Content Summary'
+        row_cells[1].text = parts_analysis.get('part_3_content_summary', 'N/A')
+
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 3 Issues'
+        issues_list = parts_analysis.get('part_3_issues', [])
+        if issues_list:
+            row_cells[1].text = '; '.join(issues_list)
+        else:
+            row_cells[1].text = 'None'
+
+        row_cells = parts_table.add_row().cells
+        row_cells[0].text = 'Part 3 Recommendations'
+        recommendations_list = parts_analysis.get('part_3_recommendations', [])
+        if recommendations_list:
+            row_cells[1].text = '; '.join(recommendations_list)
+        else:
+            row_cells[1].text = 'None'
+
+        doc.add_paragraph("")  # Empty line for spacing
+
     # Count valid and invalid questions
     valid_count = 0
     invalid_count = 0
@@ -581,6 +782,10 @@ def generate_docx(analysis_data, filename):
     summary_para = doc.add_paragraph()
     summary_para.add_run(f'Total Questions Analyzed: ').bold = True
     summary_para.add_run(f'{total_questions}\n')
+    if 'survey_general_instructions_analysis' in analysis_data:
+        summary_para.add_run(f'General Instructions Valid: ').bold = True
+        instr_valid = analysis_data['survey_general_instructions_analysis'].get('scale_correctly_defined', False)
+        summary_para.add_run(f'{"Yes" if instr_valid else "No"}\n')
     summary_para.add_run(f'Valid Questions: ').bold = True
     summary_para.add_run(f'{valid_count}\n')
     summary_para.add_run(f'Invalid Questions: ').bold = True
@@ -588,7 +793,7 @@ def generate_docx(analysis_data, filename):
 
     if total_questions > 0:
         valid_percentage = (valid_count / total_questions) * 100
-        summary_para.add_run(f'Quality Score: ').bold = True
+        summary_para.add_run(f'Question Quality Score: ').bold = True
         summary_para.add_run(f'{valid_percentage:.1f}%\n')
     else:
         valid_percentage = 0  # Default value when no questions are analyzed
