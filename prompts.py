@@ -28,7 +28,7 @@ def get_survey_system_prompt():
 
     ULTRA-CRITICAL: Pay special attention to tables in the survey. For each table:
         1.Identify the variable name ABOVE THE TABLE and its Definition.
-        2. Identify the ITEM STEM or QUESTION STEM in the FIRST CELL of the table.
+        2. Identify the ITEM STEM or QUESTION STEM in the FIRST CELL of the table. If no stem is present, FLAG it as an issue.
         3. Use the Definition and Stem as the combined framework for evaluating all questions in that table.
         4. Examine each question's alignment with both the Variable Definition and Table Stem.
 
@@ -43,6 +43,7 @@ def get_survey_system_prompt():
     CRITERIA 8 - AMBIGUITY: Unclear or ambiguous wording in relation to the variable context.
     CRITERIA 9 - STEM MISMATCH: Does not logically follow from or connect to the Table Stem.
     CRITERIA 10 - VERB ERROR: Contains less than 1 or more than 1 main verb.
+    CRITERIA 11 - EACH FIRST LETTER OF THE QUESTION SHOULD NOT BE CAPITALIZED UNLESS IT'S A PROPER NOUN.
 
     If a question is "Not Valid", you MUST suggest an alternative question that:
 
