@@ -12,10 +12,7 @@ from threading import Lock
 
 # Import the prompts module
 from prompts import (
-    get_deepseek_prompt,
-    get_gemini_prompt,
-    get_openrouter_prompt,
-    get_generic_prompt
+    get_deepseek_prompt
 )
 
 # Function to load API keys from key.json
@@ -47,10 +44,7 @@ def main():
     # Initialize session state
     if 'models' not in st.session_state:
         st.session_state.models = [
-            {"name": "DeepSeek Reasoner", "api_key": api_keys.get('deepseek', ''), "provider": "deepseek", "temperature": 0.3},
-            {"name": "Gemini 3 Flash", "api_key": api_keys.get('gemini', ''), "provider": "gemini3", "temperature": 0.3},
-            {"name": "Gemini 2.5 Flash", "api_key": api_keys.get('gemini', ''), "provider": "gemini25", "temperature": 0.3},
-            {"name": "OpenRouter (MIMO)", "api_key": api_keys.get('openrounter', ''), "provider": "openrouter", "temperature": 0.3}
+            {"name": "DeepSeek Reasoner", "api_key": api_keys.get('deepseek', ''), "provider": "deepseek", "temperature": 0.3}
         ]
 
     if 'uploaded_files' not in st.session_state:
@@ -106,10 +100,6 @@ def upload_and_results_section():
                     # Update the corresponding model in session state
                     for model in st.session_state.models:
                         if service_name == 'deepseek' and model['provider'] == 'deepseek':
-                            model['api_key'] = service_keys[0] if service_keys else ""
-                        elif service_name == 'gemini' and model['provider'] in ['gemini3', 'gemini25']:
-                            model['api_key'] = service_keys[0] if service_keys else ""
-                        elif service_name == 'openrounter' and model['provider'] == 'openrouter':
                             model['api_key'] = service_keys[0] if service_keys else ""
 
                 # Save the uploaded keys to the local key.json file
@@ -439,7 +429,7 @@ def process_uploaded_file(uploaded_file):
         return None
 
 def call_ai_model(file_content, model):
-    """Call the specified AI model for analysis"""
+    """Call the DeepSeek AI model for analysis"""
     headers = {}
     payload = {}
 
@@ -449,158 +439,16 @@ def call_ai_model(file_content, model):
             'Authorization': f"Bearer {model['api_key']}",
             'Content-Type': 'application/json'
         }
-        prompt = get_deepseek_prompt(file_content)
+
+        # Get the messages list from the updated prompt function
+        messages = get_deepseek_prompt(file_content)
         payload = {
             "model": "deepseek-reasoner",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            "messages": messages,  # This is now a list of messages with system and user roles
             "response_format": {"type": "json_object"},
             "temperature": model.get('temperature', 0.3)
         }
         url = model.get('endpoint') or 'https://api.deepseek.com/chat/completions'
-
-    elif model['provider'] in ['gemini3', 'gemini25']:
-        # For Gemini models, we use the Google Generative AI library
-        import google.generativeai as genai
-        genai.configure(api_key=model['api_key'])
-
-        # Select appropriate model
-        if model['provider'] == 'gemini3':
-            model_name = "gemini-3.0-flash"
-        else:
-            model_name = "gemini-2.5-flash"
-
-        gemini_model = genai.GenerativeModel(
-            model_name,
-            generation_config={
-                "temperature": model.get('temperature', 0.3),
-                "response_mime_type": "application/json"
-            }
-        )
-
-        prompt = get_gemini_prompt(file_content)
-
-        try:
-            response = gemini_model.generate_content(
-                [prompt]  # Pass as a list
-            )
-
-            # Parse the JSON response from Gemini
-            try:
-                analysis = json.loads(response.text if hasattr(response, 'text') else str(response))
-            except json.JSONDecodeError:
-                # If content is not valid JSON, wrap it in our expected format
-                analysis = {
-                    "individual_question_analysis": [],
-                    "overall_assessment": response.text if hasattr(response, 'text') else str(response),
-                    "recommendations": ["This model did not return structured JSON. Raw analysis: " + (response.text if hasattr(response, 'text') else str(response))]
-                }
-            return analysis
-        except Exception as e:
-            return {
-                "individual_question_analysis": [],
-                "overall_assessment": "",
-                "recommendations": [f"Error analyzing with {model['name']}: {str(e)}"]
-            }
-
-    elif model['provider'] == 'openrouter':
-        # OpenRouter API call for Xiaomi/MIMO model
-        headers = {
-            'Authorization': f"Bearer {model['api_key']}",
-            'Content-Type': 'application/json'
-        }
-        prompt = get_openrouter_prompt(file_content)
-        payload = {
-            "model": "xiaomi/mimo-v2-flash:free",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "temperature": model.get('temperature', 0.3)
-        }
-        url = model.get('endpoint') or 'https://openrouter.ai/api/v1/chat/completions'
-
-        try:
-            response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-
-            # Extract the content from the response
-            content = result['choices'][0]['message']['content']
-
-            # Try to extract valid JSON from the content
-            analysis = extract_valid_json(content)
-
-            # If we couldn't extract valid JSON, wrap it in our expected format
-            if analysis is None:
-                analysis = {
-                    "individual_question_analysis": [],
-                    "overall_assessment": content,
-                    "recommendations": ["This model did not return structured JSON. Raw analysis: " + content]
-                }
-
-            # Clean up any JSON formatting that might be embedded in the overall assessment
-            if 'overall_assessment' in analysis and analysis['overall_assessment']:
-                # Remove any JSON code block markers and clean up the text
-                assessment = analysis['overall_assessment']
-                # Remove markdown code block markers if present
-                assessment = assessment.replace('```json', '').replace('```', '').strip()
-                # If the assessment looks like it's just JSON, try to extract meaningful text
-                if assessment.startswith('{') and assessment.endswith('}'):
-                    # This means the entire assessment field was returned as JSON, which shouldn't happen
-                    # The assessment should be plain text, not JSON structure
-                    extracted = extract_valid_json(assessment)
-                    if extracted and 'overall_assessment' in extracted:
-                        analysis['overall_assessment'] = extracted['overall_assessment']
-
-            return analysis
-        except Exception as e:
-            return {
-                "quality_metrics": {},
-                "recommendations": [f"Error analyzing with {model['name']}: {str(e)}"],
-                "detailed_analysis": f"Error occurred: {str(e)}"
-            }
-
-    # DeepSeek and Generic API calls (both expect JSON responses)
-    headers = {
-        'Authorization': f"Bearer {model['api_key']}",
-        'Content-Type': 'application/json'
-    }
-
-    if model['provider'] == 'deepseek':
-        prompt = get_deepseek_prompt(file_content)
-        payload = {
-            "model": "deepseek-reasoner",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": model.get('temperature', 0.3)
-        }
-        url = model.get('endpoint') or 'https://api.deepseek.com/chat/completions'
-    else:  # Generic model
-        prompt = get_generic_prompt(file_content)
-        payload = {
-            "model": model.get('model_name', 'custom-model'),
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": model.get('temperature', 0.3)
-        }
-        url = model.get('endpoint') or 'https://api.openai.com/v1/chat/completions'
 
     try:
         response = requests.post(url, headers=headers, json=payload)
@@ -757,8 +605,8 @@ def generate_docx(analysis_data, filename):
             item_number = question.get('item_number', 'N/A')
             variable_name = question.get('variable_name', 'N/A')
 
-            # Create a heading for each question
-            question_heading = doc.add_heading(f'Question {i}', level=2)
+            # Create a heading for each question using table and item numbers
+            question_heading = doc.add_heading(f'Question Table {table_number} - {item_number}', level=2)
             if validity.lower() == 'not valid':
                 from docx.shared import RGBColor
                 question_heading.runs[0].font.color.rgb = RGBColor(255, 0, 0)  # Red for invalid questions
